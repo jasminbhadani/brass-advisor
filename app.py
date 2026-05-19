@@ -6,12 +6,7 @@ from fetch_data import fetch_prices
 from sentiment import get_sentiment
 # Auto-setup on first run (for Streamlit Cloud)
 import os
-if not os.path.exists("data/prices.csv") or not os.path.exists("models/copper_model.pkl"):
-    with st.spinner("Setting up for first time... please wait ~30 seconds"):
-        from fetch_data import fetch_prices
-        from train_model import train
-        fetch_prices()
-        train()
+
 st.set_page_config(
     page_title="Brass Purchase Advisor",
     page_icon="🔩",
