@@ -1,11 +1,10 @@
+import os
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import pickle
 from fetch_data import fetch_prices
 from sentiment import get_sentiment
-# Auto-setup on first run (for Streamlit Cloud)
-import os
 
 st.set_page_config(
     page_title="Brass Purchase Advisor",
@@ -46,128 +45,184 @@ df.dropna(inplace=True)
 features = ["copper_lag1", "copper_lag7", "copper_lag30", "usdinr_lag1", "zinc_lag1"]
 latest   = df[features].iloc[[-1]]
 
-# Core values
-copper_usd_tonne   = float(df["copper"].iloc[-1])       # USD per tonne
-forecast_usd_tonne = float(model.predict(latest)[0])    # USD per tonne
-usd_inr            = float(df["usdinr"].iloc[-1])       # 1 USD = X INR
-change_pct         = ((forecast_usd_tonne - copper_usd_tonne) / copper_usd_tonne) * 100
+# ── Core Values ───────────────────────────────────────────────────────────────
+copper_usd       = float(df["copper"].iloc[-1])         # USD/tonne
+zinc_usd         = float(df["zinc"].iloc[-1])           # USD/tonne
+usd_inr          = float(df["usdinr"].iloc[-1])         # INR per 1 USD
+forecast_usd     = float(model.predict(latest)[0])      # USD/tonne forecast
 
 # INR per kg
-copper_inr_kg   = (copper_usd_tonne   / 1000) * usd_inr
-forecast_inr_kg = (forecast_usd_tonne / 1000) * usd_inr
-change_inr_pct  = ((forecast_inr_kg - copper_inr_kg) / copper_inr_kg) * 100
+copper_inr       = (copper_usd   / 1000) * usd_inr
+zinc_inr         = (zinc_usd     / 1000) * usd_inr
+forecast_inr     = (forecast_usd / 1000) * usd_inr
 
-# ── SECTION 1 — Today's Price ─────────────────────────────────────────────────
-st.subheader("📈 Today's Copper Price")
-st.caption(f"Source: LME (London Metal Exchange) · Last updated: {df.index[-1].strftime('%d %b %Y')}")
+# Brass = 65% Copper + 35% Zinc
+brass_inr_today    = (copper_inr  * 0.65) + (zinc_inr * 0.35)
+brass_inr_forecast = (forecast_inr * 0.65) + (zinc_inr * 0.35)  # zinc assumed stable
+brass_usd_today    = (copper_usd  * 0.65) + (zinc_usd  * 0.35)
+brass_usd_forecast = (forecast_usd * 0.65) + (zinc_usd  * 0.35)
 
-col1, col2, col3 = st.columns(3)
+# Change %
+copper_change  = ((forecast_usd      - copper_usd)      / copper_usd)      * 100
+brass_change   = ((brass_inr_forecast - brass_inr_today) / brass_inr_today) * 100
+
+last_date = df.index[-1].strftime("%d %b %Y")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 1 — RAW MATERIAL PRICES TODAY
+# ══════════════════════════════════════════════════════════════════════════════
+st.subheader("📦 Raw Material Prices — Today")
+st.caption(f"Source: LME (London Metal Exchange) via Yahoo Finance · Last updated: {last_date}")
+
+col1, col2, col3, col4 = st.columns(4)
 
 col1.metric(
-    label="🔶 Copper Today  (International)",
-    value=f"USD {copper_usd_tonne:,.0f}",
-    delta="per metric tonne · US Dollar"
+    label="🔶 Copper (International)",
+    value=f"USD {copper_usd:,.0f}",
+    delta="per metric tonne"
 )
 col2.metric(
-    label="🇮🇳 Copper Today  (India)",
-    value=f"₹ {copper_inr_kg:,.1f}",
+    label="🔶 Copper (India)",
+    value=f"₹ {copper_inr:,.1f}",
     delta="per kg · Indian Rupee"
 )
 col3.metric(
-    label="💱 Exchange Rate",
-    value=f"₹ {usd_inr:.2f}",
-    delta="1 USD = INR · Live rate"
+    label="🔷 Zinc (International)",
+    value=f"USD {zinc_usd:,.0f}",
+    delta="per metric tonne"
+)
+col4.metric(
+    label="🔷 Zinc (India)",
+    value=f"₹ {zinc_inr:,.1f}",
+    delta="per kg · Indian Rupee"
 )
 
 st.divider()
 
-# ── SECTION 2 — AI Forecast ───────────────────────────────────────────────────
-st.subheader("🤖 AI Forecast — Next 7 Days")
-st.caption("XGBoost model trained on historical LME copper prices + USD/INR rate")
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 2 — BRASS PRICE ESTIMATE
+# ══════════════════════════════════════════════════════════════════════════════
+st.subheader("🔩 Estimated Brass Price Today")
+st.caption("Formula: 65% Copper + 35% Zinc  (standard brass alloy ratio)")
 
-col4, col5, col6 = st.columns(3)
+col5, col6, col7 = st.columns(3)
 
-col4.metric(
-    label="🔮 Forecast  (International)",
-    value=f"USD {forecast_usd_tonne:,.0f}",
-    delta=f"{change_pct:+.1f}% from today · per tonne"
-)
 col5.metric(
-    label="🔮 Forecast  (India)",
-    value=f"₹ {forecast_inr_kg:,.1f}",
-    delta=f"{change_inr_pct:+.1f}% from today · per kg"
+    label="🔩 Brass Price (International)",
+    value=f"USD {brass_usd_today:,.0f}",
+    delta="per metric tonne · estimated"
 )
 col6.metric(
-    label="📊 Price Movement",
-    value="Rising 📈" if change_pct > 2 else "Falling 📉" if change_pct < -2 else "Stable ➡️",
-    delta=f"{change_pct:+.1f}% expected in 7 days"
+    label="🔩 Brass Price (India)",
+    value=f"₹ {brass_inr_today:,.1f}",
+    delta="per kg · Indian Rupee · estimated"
+)
+col7.metric(
+    label="💱 Exchange Rate",
+    value=f"₹ {usd_inr:.2f}",
+    delta="1 USD = INR · live rate"
 )
 
 st.divider()
 
-# ── SECTION 3 — Recommendation ───────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 3 — AI FORECAST
+# ══════════════════════════════════════════════════════════════════════════════
+st.subheader("🤖 AI Forecast — Next 7 Days")
+st.caption("XGBoost model · trained on LME copper prices + USD/INR + zinc data")
+
+col8, col9, col10 = st.columns(3)
+
+col8.metric(
+    label="🔶 Copper Forecast",
+    value=f"USD {forecast_usd:,.0f}",
+    delta=f"{copper_change:+.1f}% from today · per tonne"
+)
+col9.metric(
+    label="🔩 Brass Price Forecast (India)",
+    value=f"₹ {brass_inr_forecast:,.1f}",
+    delta=f"{brass_change:+.1f}% from today · per kg"
+)
+col10.metric(
+    label="📊 Expected Movement",
+    value="Rising 📈" if brass_change > 2 else "Falling 📉" if brass_change < -2 else "Stable ➡️",
+    delta=f"{brass_change:+.1f}% brass price change"
+)
+
+st.divider()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 4 — PURCHASE RECOMMENDATION
+# ══════════════════════════════════════════════════════════════════════════════
 st.subheader("💡 Purchase Recommendation")
 
-if change_pct > 2:
+if brass_change > 2:
     st.error(f"""
-🔴  **BUY NOW** — Copper price expected to RISE by {change_pct:+.1f}% in next 7 days
+🔴  **BUY NOW** — Brass price expected to RISE by {brass_change:+.1f}% in next 7 days
 
-| | Today | 7-Day Forecast | Change |
-|---|---|---|---|
-| **International (USD/tonne)** | USD {copper_usd_tonne:,.0f} | USD {forecast_usd_tonne:,.0f} | {change_pct:+.1f}% |
-| **India (INR/kg)** | ₹ {copper_inr_kg:,.1f} | ₹ {forecast_inr_kg:,.1f} | {change_inr_pct:+.1f}% |
+| Material | Today (USD/t) | Today (INR/kg) | Forecast (INR/kg) | Change |
+|---|---|---|---|---|
+| 🔶 Copper | USD {copper_usd:,.0f} | ₹ {copper_inr:,.1f} | ₹ {forecast_inr:,.1f} | {copper_change:+.1f}% |
+| 🔷 Zinc | USD {zinc_usd:,.0f} | ₹ {zinc_inr:,.1f} | ₹ {zinc_inr:,.1f} | stable |
+| 🔩 **Brass (Est.)** | USD {brass_usd_today:,.0f} | **₹ {brass_inr_today:,.1f}** | **₹ {brass_inr_forecast:,.1f}** | **{brass_change:+.1f}%** |
 
-**Advice:** Purchase brass scrap this week before prices climb.
+**✅ Advice:** Purchase brass scrap this week before prices climb.
 """)
-elif change_pct < -2:
+elif brass_change < -2:
     st.success(f"""
-🟢  **WAIT** — Copper price expected to FALL by {change_pct:.1f}% in next 7 days
+🟢  **WAIT** — Brass price expected to FALL by {abs(brass_change):.1f}% in next 7 days
 
-| | Today | 7-Day Forecast | Change |
-|---|---|---|---|
-| **International (USD/tonne)** | USD {copper_usd_tonne:,.0f} | USD {forecast_usd_tonne:,.0f} | {change_pct:+.1f}% |
-| **India (INR/kg)** | ₹ {copper_inr_kg:,.1f} | ₹ {forecast_inr_kg:,.1f} | {change_inr_pct:+.1f}% |
+| Material | Today (USD/t) | Today (INR/kg) | Forecast (INR/kg) | Change |
+|---|---|---|---|---|
+| 🔶 Copper | USD {copper_usd:,.0f} | ₹ {copper_inr:,.1f} | ₹ {forecast_inr:,.1f} | {copper_change:+.1f}% |
+| 🔷 Zinc | USD {zinc_usd:,.0f} | ₹ {zinc_inr:,.1f} | ₹ {zinc_inr:,.1f} | stable |
+| 🔩 **Brass (Est.)** | USD {brass_usd_today:,.0f} | **₹ {brass_inr_today:,.1f}** | **₹ {brass_inr_forecast:,.1f}** | **{brass_change:+.1f}%** |
 
-**Advice:** Hold purchase. Better rates expected soon.
+**✅ Advice:** Hold purchase. Better rates expected soon.
 """)
 else:
     st.warning(f"""
-🟡  **NEUTRAL** — Copper price expected to remain STABLE ({change_pct:+.1f}%)
+🟡  **NEUTRAL** — Brass price expected to remain STABLE ({brass_change:+.1f}%)
 
-| | Today | 7-Day Forecast | Change |
-|---|---|---|---|
-| **International (USD/tonne)** | USD {copper_usd_tonne:,.0f} | USD {forecast_usd_tonne:,.0f} | {change_pct:+.1f}% |
-| **India (INR/kg)** | ₹ {copper_inr_kg:,.1f} | ₹ {forecast_inr_kg:,.1f} | {change_inr_pct:+.1f}% |
+| Material | Today (USD/t) | Today (INR/kg) | Forecast (INR/kg) | Change |
+|---|---|---|---|---|
+| 🔶 Copper | USD {copper_usd:,.0f} | ₹ {copper_inr:,.1f} | ₹ {forecast_inr:,.1f} | {copper_change:+.1f}% |
+| 🔷 Zinc | USD {zinc_usd:,.0f} | ₹ {zinc_inr:,.1f} | ₹ {zinc_inr:,.1f} | stable |
+| 🔩 **Brass (Est.)** | USD {brass_usd_today:,.0f} | **₹ {brass_inr_today:,.1f}** | **₹ {brass_inr_forecast:,.1f}** | **{brass_change:+.1f}%** |
 
-**Advice:** Buy as per your normal schedule. No urgent action needed.
+**✅ Advice:** Buy as per your normal schedule. No urgent action needed.
 """)
 
 st.divider()
 
-# ── SECTION 4 — Price Charts (Tabbed) ────────────────────────────────────────
-st.subheader("📊 Copper Price Trend — Last 6 Months")
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 5 — PRICE CHARTS
+# ══════════════════════════════════════════════════════════════════════════════
+st.subheader("📊 Price Trends — Last 6 Months")
 
-tab1, tab2 = st.tabs([
-    "🌍 USD per tonne  (International)",
-    "🇮🇳 INR per kg  (India)"
+tab1, tab2, tab3 = st.tabs([
+    "🔩 Brass Price (INR/kg)",
+    "🔶 Copper (USD/tonne)",
+    "🔷 Zinc (USD/tonne)"
 ])
 
+# Brass INR chart
 with tab1:
-    st.caption("LME Copper Futures · Price in USD (United States Dollar) per metric tonne")
-    recent_usd = df["copper"].iloc[-180:]
+    st.caption("Estimated brass price in INR/kg · Formula: 65% copper + 35% zinc")
+    brass_series = ((df["copper"].iloc[-180:] * 0.65) + (df["zinc"].iloc[-180:] * 0.35)) / 1000 * usd_inr
     fig1 = go.Figure()
     fig1.add_trace(go.Scatter(
-        x=recent_usd.index,
-        y=recent_usd.values,
-        name="Copper (USD/tonne)",
-        line=dict(color="#f0a500", width=2),
-        hovertemplate="Date: %{x}<br>Price: USD %{y:,.0f}/tonne<extra></extra>"
+        x=brass_series.index,
+        y=brass_series.values,
+        name="Brass (INR/kg)",
+        line=dict(color="#b5651d", width=2.5),
+        hovertemplate="Date: %{x}<br>Brass: ₹%{y:,.1f}/kg<extra></extra>"
     ))
     fig1.add_hline(
-        y=forecast_usd_tonne,
+        y=brass_inr_forecast,
         line_dash="dash",
         line_color="red",
-        annotation_text=f"7-Day Forecast: USD {forecast_usd_tonne:,.0f}",
+        annotation_text=f"7-Day Forecast: ₹{brass_inr_forecast:,.1f}/kg",
         annotation_position="bottom right"
     )
     fig1.update_layout(
@@ -175,28 +230,29 @@ with tab1:
         margin=dict(l=0, r=0, t=20, b=0),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        yaxis_title="USD per tonne",
+        yaxis_title="INR per kg",
         xaxis_title="Date"
     )
-    fig1.update_yaxes(tickprefix="USD ", tickformat=",")
+    fig1.update_yaxes(tickprefix="₹ ", tickformat=",")
     st.plotly_chart(fig1, use_container_width=True)
 
+# Copper USD chart
 with tab2:
-    st.caption("Same LME data converted to INR (Indian Rupee ₹) per kg using live USD/INR rate")
-    recent_inr = (df["copper"].iloc[-180:] / 1000) * usd_inr
+    st.caption("LME Copper Futures · USD (United States Dollar) per metric tonne")
+    recent_copper = df["copper"].iloc[-180:]
     fig2 = go.Figure()
     fig2.add_trace(go.Scatter(
-        x=recent_inr.index,
-        y=recent_inr.values,
-        name="Copper (INR/kg)",
-        line=dict(color="#138808", width=2),
-        hovertemplate="Date: %{x}<br>Price: ₹%{y:,.1f}/kg<extra></extra>"
+        x=recent_copper.index,
+        y=recent_copper.values,
+        name="Copper (USD/tonne)",
+        line=dict(color="#f0a500", width=2),
+        hovertemplate="Date: %{x}<br>Copper: USD %{y:,.0f}/tonne<extra></extra>"
     ))
     fig2.add_hline(
-        y=forecast_inr_kg,
+        y=forecast_usd,
         line_dash="dash",
         line_color="red",
-        annotation_text=f"7-Day Forecast: ₹{forecast_inr_kg:,.1f}/kg",
+        annotation_text=f"7-Day Forecast: USD {forecast_usd:,.0f}",
         annotation_position="bottom right"
     )
     fig2.update_layout(
@@ -204,42 +260,68 @@ with tab2:
         margin=dict(l=0, r=0, t=20, b=0),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        yaxis_title="INR per kg",
+        yaxis_title="USD per tonne",
         xaxis_title="Date"
     )
-    fig2.update_yaxes(tickprefix="₹ ", tickformat=",")
+    fig2.update_yaxes(tickprefix="USD ", tickformat=",")
     st.plotly_chart(fig2, use_container_width=True)
+
+# Zinc USD chart
+with tab3:
+    st.caption("LME Zinc Futures · USD (United States Dollar) per metric tonne")
+    recent_zinc = df["zinc"].iloc[-180:]
+    fig3 = go.Figure()
+    fig3.add_trace(go.Scatter(
+        x=recent_zinc.index,
+        y=recent_zinc.values,
+        name="Zinc (USD/tonne)",
+        line=dict(color="#4a90d9", width=2),
+        hovertemplate="Date: %{x}<br>Zinc: USD %{y:,.0f}/tonne<extra></extra>"
+    ))
+    fig3.update_layout(
+        height=380,
+        margin=dict(l=0, r=0, t=20, b=0),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        yaxis_title="USD per tonne",
+        xaxis_title="Date"
+    )
+    fig3.update_yaxes(tickprefix="USD ", tickformat=",")
+    st.plotly_chart(fig3, use_container_width=True)
 
 st.divider()
 
-# ── SECTION 5 — News Sentiment ────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 6 — NEWS SENTIMENT
+# ══════════════════════════════════════════════════════════════════════════════
 st.subheader("📰 Market News Sentiment")
-st.caption("Latest copper market news · Sentiment analysis powered by keyword scoring")
+st.caption("Latest copper & metal market news · keyword-based sentiment scoring")
 
 with st.spinner("Fetching latest news..."):
     signal, headlines, score = get_sentiment()
 
-col7, col8 = st.columns([1, 3])
-col7.metric("Market Signal", signal)
-col8.write("**Latest Headlines:**")
-
+col11, col12 = st.columns([1, 3])
+col11.metric("Market Signal", signal)
+col12.write("**Latest Headlines:**")
 if headlines:
     for h in headlines:
-        col8.write(f"• {h}")
+        col12.write(f"• {h}")
 else:
-    col8.info("No headlines available. Check your NewsAPI key in sentiment.py")
+    col12.info("No headlines available. Check your NewsAPI key in sentiment.py")
 
 st.divider()
 
-# ── Footer ────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# FOOTER
+# ══════════════════════════════════════════════════════════════════════════════
 st.caption("""
-📌 **Currency Reference:**
-USD = United States Dollar · 
-INR = Indian Rupee (₹) · 
-All LME prices sourced in USD · 
-INR prices calculated using live USD/INR forex rate · 
-1 tonne = 1,000 kg
+📌 **Currency & Unit Reference:**
+USD = United States Dollar · INR = Indian Rupee (₹) · 1 tonne = 1,000 kg
 
-⚠️ *AI forecast is for guidance only — not financial advice. 
-Actual prices may vary based on local market conditions in Jamnagar / Gujarat.*
+🔩 **Brass Price Calculation:**
+Estimated brass price = (Copper price × 65%) + (Zinc price × 35%)
+Based on standard brass alloy composition (CuZn35)
+
+⚠️ *AI forecast is for guidance only — not financial advice.
+Actual market prices may vary based on local conditions in Jamnagar / Gujarat.*
 """)
